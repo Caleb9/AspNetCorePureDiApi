@@ -1,5 +1,5 @@
 using System.Threading.Tasks;
-using AspNetCorePureDiApi.DependencyRoot;
+using AspNetCorePureDiApi.PureDi;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Hosting;
 
@@ -16,8 +16,8 @@ namespace AspNetCorePureDiApi
             }
             finally
             {
-                /* Dispose singletons held in ControllerActivator when application shuts down. */
-                ControllerActivator.Singleton.Dispose();
+                /* Dispose singletons held in CompositionRoot when application shuts down. */
+                CompositionRoot.Singleton.Dispose();
             }
         }
 
