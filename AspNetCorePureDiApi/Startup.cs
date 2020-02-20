@@ -1,4 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
+using AspNetCorePureDiApi.Middlewares;
+using AspNetCorePureDiApi.Models;
 using AspNetCorePureDiApi.PureDi;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -38,9 +40,9 @@ namespace AspNetCorePureDiApi
                 app.UseDeveloperExceptionPage();
             }
 
-            app.UseMiddleware<Middlewares.MyMiddleware>();
             app.UseRouting();
-
+            // app.UseMiddleware<ConventionalMiddleware>();
+            app.UseMiddleware<MyMiddleware>();
             app.UseEndpoints(endpoints => endpoints.MapControllers());
         }
     }

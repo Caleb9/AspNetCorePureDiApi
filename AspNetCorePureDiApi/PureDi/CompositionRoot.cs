@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
+using System.Threading;
 using AspNetCorePureDiApi.Controllers;
 using AspNetCorePureDiApi.Middlewares;
 using AspNetCorePureDiApi.Models;
@@ -41,12 +42,6 @@ namespace AspNetCorePureDiApi.PureDi
         internal static readonly CompositionRoot Singleton = new CompositionRoot();
 
         /// <summary>
-        ///     Request scoped dependencies for middlewares.
-        /// </summary>
-        private readonly MiddlewareDependenciesDictionary _disposableScopedMiddlewareDependencies =
-            new MiddlewareDependenciesDictionary();
-
-        /// <summary>
         ///     An example of a singleton, disposable object used in controller's or middleware's dependency graph.
         /// </summary>
         private readonly DisposableDependency _singletonDisposableDependency;
@@ -55,6 +50,14 @@ namespace AspNetCorePureDiApi.PureDi
         ///     Singleton dependencies that should be disposed on application shutdown are added to this list.
         /// </summary>
         private readonly List<IDisposable> _singletonDisposables = new List<IDisposable>();
+        
+        /// <summary>
+        ///     Request scoped dependencies for middlewares.
+        /// </summary>
+        private readonly MiddlewareDependenciesDictionary _disposableScopedMiddlewareDependencies =
+            new MiddlewareDependenciesDictionary();
+        
+        private readonly AsyncLocal<ScopedDependencies> _scopedDependencies = new AsyncLocal<ScopedDependencies>();
 
         private bool _isDisposed;
 
@@ -64,13 +67,69 @@ namespace AspNetCorePureDiApi.PureDi
             _singletonDisposableDependency = RegisterSingletonForDispose(new DisposableDependency());
         }
 
+        private T RegisterSingletonForDispose<T>(T disposableSingleton)
+            where T : IDisposable
+        {
+            _singletonDisposables.Add(disposableSingleton);
+            return disposableSingleton;
+        }
+        
+        IMiddleware IMiddlewareFactory.Create(Type middlewareType)
+        {
+            AssertNotDisposed();
+            if (middlewareType == typeof(MyMiddleware))
+            {
+                var scopedDependency = new DisposableDependency();
+                _scopedDependencies.Value = new ScopedDependencies();
+                _scopedDependencies.Value.Add<IDependency>(scopedDependency);
+                var middleware =
+                    new MyMiddleware(
+                        _singletonDisposableDependency,
+                        scopedDependency);
+                RegisterForDispose(middleware, scopedDependency);
+                return middleware;
+            }
+
+            throw new InvalidOperationException("Unknown middleware type");
+        }
+        
+        /// <summary>
+        ///     Register disposable dependencies for a middleware.
+        /// </summary>
+        private void RegisterForDispose(IMiddleware middleware, params IDisposable[] scopedDisposables)
+        {
+            var disposables =
+                _disposableScopedMiddlewareDependencies.GetOrAdd(middleware,
+                    new List<IDisposable>(scopedDisposables.Length));
+            foreach (var disposable in scopedDisposables)
+            {
+                disposables.Add(disposable);
+            }
+        }
+        
+        void IMiddlewareFactory.Release(IMiddleware middleware)
+        {
+            if (!_disposableScopedMiddlewareDependencies.TryRemove(middleware, out var disposables))
+            {
+                return;
+            }
+
+            foreach (var disposable in disposables)
+            {
+                disposable.Dispose();
+            }
+
+            _scopedDependencies.Value = null;
+        }
+
         object IControllerActivator.Create(ControllerContext context)
         {
             AssertNotDisposed();
 
             if (GetControllerType() == typeof(HelloController))
             {
-                var scopedDependency = RegisterForDispose(context, new DisposableDependency());
+                // var scopedDependency = RegisterForDispose(context, new DisposableDependency());
+                var scopedDependency = _scopedDependencies.Value.Get<IDependency>();
                 return new HelloController(
                     _singletonDisposableDependency,
                     scopedDependency);
@@ -82,6 +141,16 @@ namespace AspNetCorePureDiApi.PureDi
             {
                 return context.ActionDescriptor.ControllerTypeInfo.AsType();
             }
+        }
+
+        /// <summary>
+        ///     <paramref name="scopedDisposable" /> will be disposed when request handling by a controller is finished.
+        /// </summary>
+        private T RegisterForDispose<T>(ActionContext context, T scopedDisposable)
+            where T : IDisposable
+        {
+            context.HttpContext.Response.RegisterForDispose(scopedDisposable);
+            return scopedDisposable;
         }
 
         void IControllerActivator.Release(ControllerContext context, object controller)
@@ -108,68 +177,6 @@ namespace AspNetCorePureDiApi.PureDi
             _isDisposed = true;
         }
 
-        IMiddleware IMiddlewareFactory.Create(Type middlewareType)
-        {
-            AssertNotDisposed();
-
-            if (middlewareType == typeof(MyMiddleware))
-            {
-                var scopedDependency = new DisposableDependency();
-                var middleware =
-                    new MyMiddleware(
-                        _singletonDisposableDependency,
-                        scopedDependency);
-                RegisterForDispose(middleware, scopedDependency);
-                return middleware;
-            }
-
-            throw new InvalidOperationException("Unknown middleware type");
-        }
-
-        void IMiddlewareFactory.Release(IMiddleware middleware)
-        {
-            if (!_disposableScopedMiddlewareDependencies.TryRemove(middleware, out var disposables))
-            {
-                return;
-            }
-
-            foreach (var disposable in disposables)
-            {
-                disposable.Dispose();
-            }
-        }
-
-        private T RegisterSingletonForDispose<T>(T disposableSingleton)
-            where T : IDisposable
-        {
-            _singletonDisposables.Add(disposableSingleton);
-            return disposableSingleton;
-        }
-
-        /// <summary>
-        ///     <paramref name="scopedDisposable" /> will be disposed when request handling by a controller is finished.
-        /// </summary>
-        private T RegisterForDispose<T>(ActionContext context, T scopedDisposable)
-            where T : IDisposable
-        {
-            context.HttpContext.Response.RegisterForDispose(scopedDisposable);
-            return scopedDisposable;
-        }
-
-        /// <summary>
-        ///     Register disposable dependencies for a middleware.
-        /// </summary>
-        private void RegisterForDispose(IMiddleware middleware, params IDisposable[] scopedDisposables)
-        {
-            var disposables =
-                _disposableScopedMiddlewareDependencies.GetOrAdd(middleware,
-                    new List<IDisposable>(scopedDisposables.Length));
-            foreach (var disposable in scopedDisposables)
-            {
-                disposables.Add(disposable);
-            }
-        }
-
         /// <summary>
         ///     We should not be able to re-use a disposed instance of this class. All the singletons are already
         ///     disposed.
@@ -181,6 +188,21 @@ namespace AspNetCorePureDiApi.PureDi
             {
                 throw new ObjectDisposedException(ToString());
             }
+        }
+    }
+    
+    class ScopedDependencies
+    {
+        private readonly Dictionary<Type, object> _dependencies = new Dictionary<Type, object>();
+
+        public void Add<T>(T dependency)
+        {
+            _dependencies.Add(typeof(T), dependency);
+        }
+        
+        public T Get<T>()
+        {
+            return (T) _dependencies[typeof(T)];
         }
     }
 }
