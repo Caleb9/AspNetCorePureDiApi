@@ -7,8 +7,8 @@ namespace AspNetCorePureDiApi.Controllers
     [Route("api/[controller]")]
     public class HelloController : ControllerBase
     {
-        private readonly IDependency _singletonDependency;
         private readonly IDependency _scopedDependency;
+        private readonly IDependency _singletonDependency;
 
         public HelloController(
             IDependency singletonDependency,
@@ -17,7 +17,7 @@ namespace AspNetCorePureDiApi.Controllers
             _singletonDependency = singletonDependency;
             _scopedDependency = scopedDependency;
         }
-        
+
         [HttpGet]
         public IActionResult Index()
         {

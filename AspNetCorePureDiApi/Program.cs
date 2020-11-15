@@ -1,20 +1,25 @@
 using System.Threading.Tasks;
-using Microsoft.AspNetCore;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.Extensions.Hosting;
 
 namespace AspNetCorePureDiApi
 {
-    public class Program
+    public static class Program
     {
         public static async Task Main(string[] args)
         {
-            using var host = CreateWebHostBuilder(args).Build();
+            using var host = CreateHostBuilder(args).Build();
             await host.RunAsync();
         }
 
-        public static IWebHostBuilder CreateWebHostBuilder(string[] args)
+        private static IHostBuilder CreateHostBuilder(string[] args)
         {
-            return WebHost.CreateDefaultBuilder(args).UseStartup<Startup>();
+            /* Turns out this type of configuration of Host is needed to enable integration tests to overwrite
+             * dependency registrations. I.e. we need to use Host (not WebHost) and explicitly call UseStartup.
+             * This makes ConfigureServices in IntegrationTestsFactory execute AFTER ConfigureServices in Startup. */
+            return Host
+                .CreateDefaultBuilder(args)
+                .ConfigureWebHostDefaults(builder => builder.UseStartup<Startup>());
         }
     }
 }

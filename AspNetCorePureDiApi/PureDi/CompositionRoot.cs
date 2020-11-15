@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using AspNetCorePureDiApi.Controllers;
 using AspNetCorePureDiApi.Middlewares;
@@ -24,7 +23,6 @@ namespace AspNetCorePureDiApi.PureDi
     /// <remarks>
     ///     Possibly this is an overkill as when the application shuts down all the memory gets reclaimed either way.
     ///     However it's a good practice to always dispose of everything that is IDisposable.
-    /// 
     ///     There is a flaw in current implementation that middlewares and controllers do not share request scoped
     ///     dependencies. It is not trivial to solve this problem without giving up compile time checking of dependency
     ///     types (i.e. not reinventing the wheel by implementing an actual DI container). How should request scoped
@@ -40,36 +38,54 @@ namespace AspNetCorePureDiApi.PureDi
             new MiddlewareDependenciesDictionary();
 
         /// <summary>
-        ///     An example of a singleton, disposable object used in controller's or middleware's dependency graph.
+        ///     An example of a singleton object used in controller's or middleware's dependency graph.
         /// </summary>
-        private readonly DisposableDependency _singletonDisposableDependency;
+        private readonly IDependency _singletonDependency;
 
         /// <summary>
         ///     Singleton dependencies that should be disposed on application shutdown are added to this list.
         /// </summary>
         private readonly List<IDisposable> _singletonDisposables = new List<IDisposable>();
 
-        private bool _isDisposed;
+        /// <summary>
+        ///     To enable testing if disposable, scoped dependencies get disposed we can inject a factory of these
+        ///     dependencies. This is a compromise between testability and purity of the code (i.e. a testing concern
+        ///     is visible in "production" code.
+        /// </summary>
+        private readonly Func<IDependency>? _testingScopedDependencyFactory;
 
-        [SuppressMessage("ReSharper", "MemberCanBePrivate.Global") /* Used implicitly in Startup */]
-        public CompositionRoot()
+        private bool _isCompositionRootDisposed;
+
+        /// <summary>
+        ///     This constructor enables injection of dependencies for testing purposes. In real life scenario it would
+        ///     probably be enough to limit this kind of injection to out-of-process "collaborators", e.g. repositories
+        ///     communicating with databases, as we would typically want to substitute them with test doubles in tests.
+        /// </summary>
+        /// <param name="singletonDependency">Inject for testing purposes</param>
+        /// <param name="scopedDependencyFactory">Inject for testing purposes</param>
+        public CompositionRoot(
+            IDependency? singletonDependency = default,
+            Func<IDependency>? scopedDependencyFactory = default)
         {
-            _singletonDisposableDependency = RegisterSingletonForDispose(new DisposableDependency());
+            _singletonDependency =
+                RegisterSingletonDependencyForDispose(
+                    singletonDependency ?? new DisposableDependency());
+            _testingScopedDependencyFactory = scopedDependencyFactory;
         }
 
         object IControllerActivator.Create(ControllerContext context)
         {
             AssertNotDisposed();
 
-            if (GetControllerType() == typeof(HelloController))
+            if (GetControllerType() != typeof(HelloController))
             {
-                var scopedDependency = RegisterForDispose(context, new DisposableDependency());
-                return new HelloController(
-                    _singletonDisposableDependency,
-                    scopedDependency);
+                throw new InvalidOperationException("Unknown controller type");
             }
 
-            throw new InvalidOperationException("Unknown controller type");
+            var scopedDependency = RegisterScopedDependencyForDispose(context, NewScopedDependency());
+            return new HelloController(
+                _singletonDependency,
+                scopedDependency);
 
             Type GetControllerType()
             {
@@ -84,7 +100,7 @@ namespace AspNetCorePureDiApi.PureDi
 
         public void Dispose()
         {
-            if (_isDisposed)
+            if (_isCompositionRootDisposed)
             {
                 /* When ASP.NET Core container gets disposed it's also disposing everything registered in it. Since we
                  * register CompositionRoot as itself, as IMiddlewareFactory and as IControllerActivator, this method
@@ -92,15 +108,7 @@ namespace AspNetCorePureDiApi.PureDi
                 return;
             }
 
-            /* Dispose any leftover middleware disposables. This potentially can matter if application is shut-down
-             * before it finished handling a request. */
-            var disposableMiddlewareDependencies =
-                _disposableScopedMiddlewareDependencies.Values
-                    .SelectMany(disposables => disposables);
-            foreach (var disposable in disposableMiddlewareDependencies)
-            {
-                disposable.Dispose();
-            }
+            DisposeLeftoverScopedMiddlewareDependencies();
 
             /* Dispose singletons */
             foreach (var disposable in _singletonDisposables)
@@ -108,25 +116,38 @@ namespace AspNetCorePureDiApi.PureDi
                 disposable.Dispose();
             }
 
-            _isDisposed = true;
+            _isCompositionRootDisposed = true;
+
+            void DisposeLeftoverScopedMiddlewareDependencies()
+            {
+                /* Dispose any leftover middleware disposables. This potentially can matter if application is shut-down
+                 * before it finished handling a request. */
+                var disposableMiddlewareDependencies =
+                    _disposableScopedMiddlewareDependencies.Values
+                        .SelectMany(disposables => disposables);
+                foreach (var disposable in disposableMiddlewareDependencies)
+                {
+                    disposable.Dispose();
+                }
+            }
         }
 
         IMiddleware IMiddlewareFactory.Create(Type middlewareType)
         {
             AssertNotDisposed();
 
-            if (middlewareType == typeof(MyMiddleware))
+            if (middlewareType != typeof(MyMiddleware))
             {
-                var scopedDependency = new DisposableDependency();
-                var middleware =
-                    new MyMiddleware(
-                        _singletonDisposableDependency,
-                        scopedDependency);
-                RegisterForDispose(middleware, scopedDependency);
-                return middleware;
+                throw new InvalidOperationException("Unknown middleware type");
             }
 
-            throw new InvalidOperationException("Unknown middleware type");
+            var scopedDependency = NewScopedDependency();
+            var middleware =
+                new MyMiddleware(
+                    _singletonDependency,
+                    scopedDependency);
+            RegisterScopedDependencyForDispose(middleware, scopedDependency);
+            return middleware;
         }
 
         void IMiddlewareFactory.Release(IMiddleware middleware)
@@ -142,32 +163,47 @@ namespace AspNetCorePureDiApi.PureDi
             }
         }
 
-        private T RegisterSingletonForDispose<T>(T disposableSingleton)
-            where T : IDisposable
+        private IDependency NewScopedDependency()
         {
-            _singletonDisposables.Add(disposableSingleton);
-            return disposableSingleton;
+            return _testingScopedDependencyFactory?.Invoke() ?? new DisposableDependency();
+        }
+
+        private T RegisterSingletonDependencyForDispose<T>(T singletonDependency)
+        {
+            if (singletonDependency is IDisposable disposableSingleton)
+            {
+                _singletonDisposables.Add(disposableSingleton);
+            }
+
+            return singletonDependency;
         }
 
         /// <summary>
-        ///     <paramref name="scopedDisposable" /> will be disposed when request handling by a controller is finished.
+        ///     <paramref name="scopedDependency" /> will be disposed when request handling by a controller is finished.
         /// </summary>
-        private T RegisterForDispose<T>(ActionContext context, T scopedDisposable)
-            where T : IDisposable
+        private T RegisterScopedDependencyForDispose<T>(ActionContext context, T scopedDependency)
         {
-            context.HttpContext.Response.RegisterForDispose(scopedDisposable);
-            return scopedDisposable;
+            if (scopedDependency is IDisposable scopedDisposable)
+            {
+                context.HttpContext.Response.RegisterForDispose(scopedDisposable);
+            }
+
+            return scopedDependency;
         }
 
         /// <summary>
         ///     Register disposable dependencies for a middleware.
         /// </summary>
-        private void RegisterForDispose(IMiddleware middleware, params IDisposable[] scopedDisposables)
+        private void RegisterScopedDependencyForDispose(IMiddleware middleware, params IDependency[] scopedDependencies)
         {
+            var disposableDependencies =
+                scopedDependencies
+                    .Where(d => d is IDisposable)
+                    .Cast<IDisposable>();
             var disposables =
                 _disposableScopedMiddlewareDependencies.GetOrAdd(middleware,
-                    new List<IDisposable>(scopedDisposables.Length));
-            foreach (var disposable in scopedDisposables)
+                    new List<IDisposable>(scopedDependencies.Length));
+            foreach (var disposable in disposableDependencies)
             {
                 disposables.Add(disposable);
             }
@@ -180,7 +216,7 @@ namespace AspNetCorePureDiApi.PureDi
         /// <exception cref="ObjectDisposedException"></exception>
         private void AssertNotDisposed()
         {
-            if (_isDisposed)
+            if (_isCompositionRootDisposed)
             {
                 throw new ObjectDisposedException(ToString());
             }
