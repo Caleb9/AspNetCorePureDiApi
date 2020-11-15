@@ -1,6 +1,6 @@
-# ASP.NET Core 3.1 Pure DI Example
+# ASP.NET Core 5.0 Pure DI Example
 
-A simplistic example of utilizing Pure DI in ASP.NET Core 3.1 Web API
+A simplistic example of utilizing Pure DI in ASP.NET Core 5.0 Web API
 project.
 
 The __Composition Root__ is implemented in a custom
@@ -15,7 +15,7 @@ Try to build and run the application in console, e.g. on Linux with
 
 ```
 $ dotnet build
-$ ./AspNetCorePureDiApi/bin/Debug/netcoreapp3.1/AspNetCorePureDiApi
+$ ./AspNetCorePureDiApi/bin/Debug/netcoreapp5.0/AspNetCorePureDiApi
 ```
 
 Open a web browser, and navigate to
@@ -33,20 +33,14 @@ application to see that singleton dependencies get disposed as well.
 
 Implementation replaces the default ControllerActivator and
 MiddlewareFactory with a custom class which serves as the Composition
-Root. Crucial here is the fact that `CompositionRoot` exposes a
-singleton instance that gets disposed when application shuts
-down. This in turn, disposes all of the singleton dependencies held by
-the `CompositionRoot`. Scoped controller dependencies are registered
-for disposal in `ControllerContext.HttpContext.Response` and get
-automatically disposed by the framework along with the
-response. Scoped middleware dependencies are disposed in a similar
-manner. `CompositionRoot` implements a Singleton pattern itself, so it
-is accessible from the `Program` for disposal. Simply registering a
-singleton IDisposable service in
-`Startup.ConfigureServices(IServiceCollection services)` method does
-not seem to dispose of it when application shuts down. Alternatively,
-we could possibly pass an instance of `CompositionRoot` from `Program`
-to `Startup`.
+Root. The `CompositionRoot` class is registered in default ASP.NET
+Core's DI container (`IServicesCollection`) as singleton and gets
+disposed when application shuts down. This in turn, disposes all of
+the singleton dependencies held by the `CompositionRoot`. Scoped
+controller dependencies are registered for disposal in
+`ControllerContext.HttpContext.Response` and get automatically
+disposed by the framework along with the response. Scoped middleware
+dependencies are disposed in a similar manner.
 
 Note that despite the fact that all the DI logic is implemented in the
 `CompositionRoot`, I would probably delegate the responsibility of
@@ -71,7 +65,9 @@ It is potentially possible to workaround this issue by using
 dependencies in `IMiddlewareFactory.Create` method and consumed by
 `IControllerActivator.Create`. However we are loosing compile-time
 checking of dependencies in the latter method (when creating a
-controller), which is the whole point of Pure DI.
+controller), which is the whole point of Pure DI. Solving this problem
+also moves us close to implementing our own DI container - not
+something we aim to do here.
 
 A compromise could be to only allow singleton middlewares, as in
 classic Microsoft.Owin pipeline but that of course poses other
