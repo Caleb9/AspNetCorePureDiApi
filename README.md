@@ -77,5 +77,8 @@ limitations.
 ### Discussion
 
 It is entirely possible that there is a better way to do this, or that
-such implementation has potential problems which I don't see. Comments
-are welcome in the Issues section.
+such implementation has potential problems which I don't see (except
+the separate middleware / controller request-scoped
+dependencies). Comments are welcome in the Issues section or in my
+[Code Review question on
+StackExchange](https://codereview.stackexchange.com/q/236245/217305).
