@@ -1,4 +1,3 @@
-using System;
 using AspNetCorePureDiApi.Models;
 using Microsoft.AspNetCore.Mvc;
 

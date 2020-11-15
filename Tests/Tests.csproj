@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>netcoreapp3.1</TargetFramework>
+    </PropertyGroup>
+
+    <ItemGroup>
+      <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="3.1.10" />
+      <PackageReference Include="Microsoft.NET.Test.Sdk" Version="16.8.0" />
+      <PackageReference Include="xunit" Version="2.4.1" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <ProjectReference Include="..\AspNetCorePureDiApi\AspNetCorePureDiApi.csproj" />
+    </ItemGroup>
+
+</Project>
