@@ -61,16 +61,16 @@ namespace AspNetCorePureDiApi.PureDi
         ///     probably be enough to limit this kind of injection to out-of-process "collaborators", e.g. repositories
         ///     communicating with databases, as we would typically want to substitute them with test doubles in tests.
         /// </summary>
-        /// <param name="singletonDependency">Inject for testing purposes</param>
-        /// <param name="scopedDependencyFactory">Inject for testing purposes</param>
+        /// <param name="testingSingletonDependency">Inject for testing purposes</param>
+        /// <param name="testingScopedDependencyFactory">Inject for testing purposes</param>
         public CompositionRoot(
-            IDependency? singletonDependency = default,
-            Func<IDependency>? scopedDependencyFactory = default)
+            IDependency? testingSingletonDependency = default,
+            Func<IDependency>? testingScopedDependencyFactory = default)
         {
             _singletonDependency =
                 RegisterSingletonDependencyForDispose(
-                    singletonDependency ?? new DisposableDependency());
-            _testingScopedDependencyFactory = scopedDependencyFactory;
+                    testingSingletonDependency ?? new DisposableDependency());
+            _testingScopedDependencyFactory = testingScopedDependencyFactory;
         }
 
         object IControllerActivator.Create(ControllerContext context)
@@ -199,10 +199,12 @@ namespace AspNetCorePureDiApi.PureDi
             var disposableDependencies =
                 scopedDependencies
                     .Where(d => d is IDisposable)
-                    .Cast<IDisposable>();
+                    .Cast<IDisposable>()
+                    .ToList();
             var disposables =
-                _disposableScopedMiddlewareDependencies.GetOrAdd(middleware,
-                    new List<IDisposable>(scopedDependencies.Length));
+                _disposableScopedMiddlewareDependencies.GetOrAdd(
+                    middleware,
+                    new List<IDisposable>(disposableDependencies.Count));
             foreach (var disposable in disposableDependencies)
             {
                 disposables.Add(disposable);

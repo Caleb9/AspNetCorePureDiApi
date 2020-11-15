@@ -46,7 +46,7 @@ namespace Tests
             using var client =
                 factory.CreateClient(
                     new CompositionRoot(
-                        scopedDependencyFactory: () => scopedDependencyStub.Object));
+                        testingScopedDependencyFactory: () => scopedDependencyStub.Object));
 
             await client.GetAsync("/api/hello");
 
