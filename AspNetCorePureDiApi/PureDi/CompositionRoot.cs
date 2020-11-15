@@ -8,7 +8,6 @@ using AspNetCorePureDiApi.Models;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Controllers;
-/* Short name to limit line width */
 using MiddlewareDependenciesDictionary = System.Collections.Concurrent.ConcurrentDictionary<
     Microsoft.AspNetCore.Http.IMiddleware, System.Collections.Generic.ICollection<System.IDisposable>>;
 
@@ -24,22 +23,16 @@ namespace AspNetCorePureDiApi.PureDi
     /// </summary>
     /// <remarks>
     ///     Possibly this is an overkill as when the application shuts down all the memory gets reclaimed either way.
-    ///     However it's a good practice to always dispose of everything that is IDisposable
+    ///     However it's a good practice to always dispose of everything that is IDisposable.
+    /// 
+    ///     There is a flaw in current implementation that middlewares and controllers do not share request scoped
+    ///     dependencies. It is not trivial to solve this problem without giving up compile time checking of dependency
+    ///     types (i.e. not reinventing the wheel by implementing an actual DI container). How should request scoped
+    ///     dependencies be shared between IControllerActivator.Create and IMiddlewareFactory.Create?
     /// </remarks>
     public sealed class CompositionRoot
         : IMiddlewareFactory, IControllerActivator, IDisposable
     {
-        /// <summary>
-        ///     Ensures that this instance along with associated disposables can be disposed by <see cref="Program" />
-        ///     when the application is shutdown. Just by registering CompositionRoot in Startup's
-        ///     IServiceCollection does not dispose of it automatically.
-        ///     The field is internal so it is not used outside of this project. Integration tests should be able to
-        ///     construct their own copy of CompositionRoot, probably with IDisposable dependencies swapped with
-        ///     fakes (as it indicates that they access out-of-process resources). Such scenario would call for more
-        ///     complex solution where those dependencies are accessible for overwriting in tests.
-        /// </summary>
-        internal static readonly CompositionRoot Singleton = new CompositionRoot();
-
         /// <summary>
         ///     Request scoped dependencies for middlewares.
         /// </summary>
@@ -91,14 +84,24 @@ namespace AspNetCorePureDiApi.PureDi
 
         public void Dispose()
         {
-            /* Dispose any leftover middleware disposables. This can only matter if application is shut-down in the
-             * middle of handling a request (not sure if that can ever happen). */
+            if (_isDisposed)
+            {
+                /* When ASP.NET Core container gets disposed it's also disposing everything registered in it. Since we
+                 * register CompositionRoot as itself, as IMiddlewareFactory and as IControllerActivator, this method
+                 * gets invoked multiple times. */
+                return;
+            }
+
+            /* Dispose any leftover middleware disposables. This potentially can matter if application is shut-down
+             * before it finished handling a request. */
             var disposableMiddlewareDependencies =
-             _disposableScopedMiddlewareDependencies.Values.SelectMany(disposables => disposables);
+                _disposableScopedMiddlewareDependencies.Values
+                    .SelectMany(disposables => disposables);
             foreach (var disposable in disposableMiddlewareDependencies)
             {
                 disposable.Dispose();
             }
+
             /* Dispose singletons */
             foreach (var disposable in _singletonDisposables)
             {

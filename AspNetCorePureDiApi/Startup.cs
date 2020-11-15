@@ -16,12 +16,16 @@ namespace AspNetCorePureDiApi
         public void ConfigureServices(
             IServiceCollection services)
         {
-            services 
-                /* Replace default MiddlewareFactory with custom one implementing Pure DI. See comments in
-                 * CompositionRoot for explanation why this is implementing the Singleton pattern. */
-                .AddSingleton<IMiddlewareFactory>(CompositionRoot.Singleton)
+            services
+                /* We need to register the CompositionRoot as singleton to use it in factory method for both
+                 * IMiddlewareFactory and IControllerActivator. Usage of factory method is necessary if we want to avoid
+                 * creating two instances of CompositionRoot (one for IMiddlewareFactory and one for
+                 * IControllerActivator). */
+                .AddSingleton<CompositionRoot>()
+                /* Replace default MiddlewareFactory with custom one implementing Pure DI. */
+                .AddSingleton<IMiddlewareFactory>(s => s.GetRequiredService<CompositionRoot>())
                 /* Replace default ControllerActivator with custom one implementing Pure DI. */
-                .AddSingleton<IControllerActivator>(CompositionRoot.Singleton)
+                .AddSingleton<IControllerActivator>(s => s.GetRequiredService<CompositionRoot>())
                 /* Alternative implementation could do all the work of ControllerActivator in IControllerFactory */
                 // .AddSingleton<IControllerFactory, ControllerFactory>()
                 .AddControllers();
